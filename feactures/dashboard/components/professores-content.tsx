@@ -1,10 +1,8 @@
 "use client"
 
-import React from "react"
-
-import { useState } from "react"
-import { Button } from "@/feactures/dashboard/components/ui/button"
-import { Badge } from "@/feactures/dashboard/components/ui/badge"
+import React, { useState, useTransition } from "react"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import {
   Dialog,
   DialogContent,
@@ -13,53 +11,80 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@/feactures/dashboard/components/ui/dialog"
-import { Input } from "@/feactures/dashboard/components/ui/input"
-import { Label } from "@/feactures/dashboard/components/ui/label"
-import { DataTable } from "@/feactures/dashboard/components/data-table"
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Checkbox } from "@/components/ui/checkbox"
+import { DataTable } from "@/components/data-table"
 import { Plus, Users } from "lucide-react"
+import { criarProfessor, atualizarProfessor, apagarProfessor } from "@/app/professores/professores-action"
+import { useRouter } from "next/navigation"
 
-interface Professor {
-  id: string
+interface Disciplina {
+  idDisciplina: number
   nome: string
-  email: string
-  telefone: string
-  disciplinas: string[]
-  cargaHoraria: number
-  status: "ativo" | "inativo"
 }
 
-const initialProfessores: Professor[] = [
-  { id: "1", nome: "Maria Silva", email: "maria.silva@escola.pt", telefone: "912345678", disciplinas: ["Matematica", "Fisica"], cargaHoraria: 22, status: "ativo" },
-  { id: "2", nome: "Joao Santos", email: "joao.santos@escola.pt", telefone: "923456789", disciplinas: ["Portugues", "Historia"], cargaHoraria: 20, status: "ativo" },
-  { id: "3", nome: "Ana Costa", email: "ana.costa@escola.pt", telefone: "934567890", disciplinas: ["Fisica", "Quimica"], cargaHoraria: 18, status: "ativo" },
-  { id: "4", nome: "Pedro Oliveira", email: "pedro.oliveira@escola.pt", telefone: "945678901", disciplinas: ["Historia", "Geografia"], cargaHoraria: 22, status: "ativo" },
-  { id: "5", nome: "Sofia Ferreira", email: "sofia.ferreira@escola.pt", telefone: "956789012", disciplinas: ["Ingles"], cargaHoraria: 16, status: "inativo" },
-  { id: "6", nome: "Carlos Rodrigues", email: "carlos.rodrigues@escola.pt", telefone: "967890123", disciplinas: ["Educacao Fisica"], cargaHoraria: 24, status: "ativo" },
-  { id: "7", nome: "Teresa Almeida", email: "teresa.almeida@escola.pt", telefone: "978901234", disciplinas: ["Biologia", "Ciencias"], cargaHoraria: 20, status: "ativo" },
-  { id: "8", nome: "Ricardo Martins", email: "ricardo.martins@escola.pt", telefone: "989012345", disciplinas: ["Informatica"], cargaHoraria: 18, status: "ativo" },
-]
+interface ProfessorData {
+  id_professor: number
+  Utilizador: {
+    id: number
+    nome: string
+    email: string | null
+    tipo: string
+    workos_id: string | null
+  }
+  ProfDisciplinas: {
+    Disciplina: Disciplina
+  }[]
+}
 
-export function ProfessoresContent() {
-  const [professores, setProfessores] = useState<Professor[]>(initialProfessores)
+interface ProfessorRow {
+  id: number
+  id_professor: number
+  nome: string
+  email: string
+  disciplinas: string[]
+  disciplinaIds: number[]
+}
+
+function mapProfessores(professores: ProfessorData[]): ProfessorRow[] {
+  return professores.map((p) => ({
+    id: p.Utilizador.id,
+    id_professor: p.id_professor,
+    nome: p.Utilizador.nome,
+    email: p.Utilizador.email || "",
+    disciplinas: p.ProfDisciplinas.map((pd) => pd.Disciplina.nome),
+    disciplinaIds: p.ProfDisciplinas.map((pd) => pd.Disciplina.idDisciplina),
+  }))
+}
+
+interface ProfessoresContentProps {
+  professores: ProfessorData[]
+  disciplinas: Disciplina[]
+}
+
+export function ProfessoresContent({ professores, disciplinas }: ProfessoresContentProps) {
+  const router = useRouter()
+  const [isPending, startTransition] = useTransition()
   const [isOpen, setIsOpen] = useState(false)
-  const [editingProfessor, setEditingProfessor] = useState<Professor | null>(null)
+  const [editingProfessor, setEditingProfessor] = useState<ProfessorRow | null>(null)
   const [formData, setFormData] = useState({
     nome: "",
     email: "",
-    telefone: "",
-    disciplinas: "",
-    cargaHoraria: "",
+    disciplinaIds: [] as number[],
   })
+  const [error, setError] = useState<string | null>(null)
+
+  const rows = mapProfessores(professores)
 
   const columns = [
     { key: "nome" as const, header: "Nome" },
     { key: "email" as const, header: "Email" },
-    { key: "telefone" as const, header: "Telefone" },
     {
       key: "disciplinas",
       header: "Disciplinas",
-      render: (professor: Professor) => (
+      render: (professor: ProfessorRow) => (
         <div className="flex flex-wrap gap-1">
           {professor.disciplinas.map((d) => (
             <Badge key={d} variant="outline" className="text-xs">
@@ -69,80 +94,70 @@ export function ProfessoresContent() {
         </div>
       ),
     },
-    {
-      key: "cargaHoraria" as const,
-      header: "Carga Horaria",
-      render: (professor: Professor) => `${professor.cargaHoraria}h/semana`,
-    },
-    {
-      key: "status",
-      header: "Status",
-      render: (professor: Professor) => (
-        <Badge
-          className={
-            professor.status === "ativo"
-              ? "bg-green-600 text-white"
-              : "bg-muted text-muted-foreground"
-          }
-        >
-          {professor.status.charAt(0).toUpperCase() + professor.status.slice(1)}
-        </Badge>
-      ),
-    },
   ]
+
+  const toggleDisciplina = (id: number) => {
+    setFormData((prev) => ({
+      ...prev,
+      disciplinaIds: prev.disciplinaIds.includes(id)
+        ? prev.disciplinaIds.filter((d) => d !== id)
+        : [...prev.disciplinaIds, id],
+    }))
+  }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (editingProfessor) {
-      setProfessores((prev) =>
-        prev.map((p) =>
-          p.id === editingProfessor.id
-            ? {
-                ...p,
-                nome: formData.nome,
-                email: formData.email,
-                telefone: formData.telefone,
-                disciplinas: formData.disciplinas.split(",").map((d) => d.trim()),
-                cargaHoraria: parseInt(formData.cargaHoraria) || 0,
-              }
-            : p
-        )
-      )
-    } else {
-      const newProfessor: Professor = {
-        id: String(Date.now()),
-        nome: formData.nome,
-        email: formData.email,
-        telefone: formData.telefone,
-        disciplinas: formData.disciplinas.split(",").map((d) => d.trim()),
-        cargaHoraria: parseInt(formData.cargaHoraria) || 0,
-        status: "ativo",
+    setError(null)
+
+    const fd = new FormData()
+    fd.append("nome", formData.nome)
+    fd.append("email", formData.email)
+    formData.disciplinaIds.forEach((id) => fd.append("disciplinaIds", String(id)))
+
+    startTransition(async () => {
+      let result
+      if (editingProfessor) {
+        result = await atualizarProfessor(editingProfessor.id, fd)
+      } else {
+        result = await criarProfessor(fd)
       }
-      setProfessores((prev) => [...prev, newProfessor])
-    }
-    resetForm()
+
+      if (result.success) {
+        resetForm()
+        router.refresh()
+      } else {
+        setError(result.message || "Erro inesperado")
+      }
+    })
   }
 
   const resetForm = () => {
-    setFormData({ nome: "", email: "", telefone: "", disciplinas: "", cargaHoraria: "" })
+    setFormData({ nome: "", email: "", disciplinaIds: [] })
     setEditingProfessor(null)
+    setError(null)
     setIsOpen(false)
   }
 
-  const handleEdit = (professor: Professor) => {
+  const handleEdit = (professor: ProfessorRow) => {
     setEditingProfessor(professor)
     setFormData({
       nome: professor.nome,
       email: professor.email,
-      telefone: professor.telefone,
-      disciplinas: professor.disciplinas.join(", "),
-      cargaHoraria: String(professor.cargaHoraria),
+      disciplinaIds: professor.disciplinaIds,
     })
+    setError(null)
     setIsOpen(true)
   }
 
-  const handleDelete = (professor: Professor) => {
-    setProfessores((prev) => prev.filter((p) => p.id !== professor.id))
+  const handleDelete = (professor: ProfessorRow) => {
+    startTransition(async () => {
+      const result = await apagarProfessor(professor.id)
+      if (result.success) {
+        router.refresh()
+      } else {
+        setError(result.message || "Erro ao apagar professor")
+      }
+    })
   }
 
   return (
@@ -194,41 +209,44 @@ export function ProfessoresContent() {
                   />
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="telefone">Telefone</Label>
-                  <Input
-                    id="telefone"
-                    value={formData.telefone}
-                    onChange={(e) => setFormData({ ...formData, telefone: e.target.value })}
-                    required
-                  />
+                  <Label>Disciplinas</Label>
+                  <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto rounded-md border p-3">
+                    {disciplinas.map((d) => (
+                      <div key={d.idDisciplina} className="flex items-center gap-2">
+                        <Checkbox
+                          id={`disc-${d.idDisciplina}`}
+                          checked={formData.disciplinaIds.includes(d.idDisciplina)}
+                          onCheckedChange={() => toggleDisciplina(d.idDisciplina)}
+                        />
+                        <Label
+                          htmlFor={`disc-${d.idDisciplina}`}
+                          className="text-sm font-normal cursor-pointer"
+                        >
+                          {d.nome}
+                        </Label>
+                      </div>
+                    ))}
+                    {disciplinas.length === 0 && (
+                      <p className="text-sm text-muted-foreground col-span-2">
+                        Nenhuma disciplina registada.
+                      </p>
+                    )}
+                  </div>
                 </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="disciplinas">Disciplinas (separadas por virgula)</Label>
-                  <Input
-                    id="disciplinas"
-                    value={formData.disciplinas}
-                    onChange={(e) => setFormData({ ...formData, disciplinas: e.target.value })}
-                    placeholder="Matematica, Fisica"
-                    required
-                  />
-                </div>
-                <div className="grid gap-2">
-                  <Label htmlFor="cargaHoraria">Carga Horaria (horas/semana)</Label>
-                  <Input
-                    id="cargaHoraria"
-                    type="number"
-                    value={formData.cargaHoraria}
-                    onChange={(e) => setFormData({ ...formData, cargaHoraria: e.target.value })}
-                    required
-                  />
-                </div>
+                {error && (
+                  <p className="text-sm text-destructive">{error}</p>
+                )}
               </div>
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={resetForm}>
                   Cancelar
                 </Button>
-                <Button type="submit">
-                  {editingProfessor ? "Guardar" : "Adicionar"}
+                <Button type="submit" disabled={isPending}>
+                  {isPending
+                    ? "A guardar..."
+                    : editingProfessor
+                    ? "Guardar"
+                    : "Adicionar"}
                 </Button>
               </DialogFooter>
             </form>
@@ -241,15 +259,15 @@ export function ProfessoresContent() {
           <Users className="h-6 w-6 text-primary" />
         </div>
         <div>
-          <p className="text-2xl font-bold">{professores.length}</p>
+          <p className="text-2xl font-bold">{rows.length}</p>
           <p className="text-sm text-muted-foreground">
-            Professores registados ({professores.filter((p) => p.status === "ativo").length} ativos)
+            Professores registados
           </p>
         </div>
       </div>
 
       <DataTable
-        data={professores}
+        data={rows}
         columns={columns}
         searchKey="nome"
         searchPlaceholder="Pesquisar professores..."
